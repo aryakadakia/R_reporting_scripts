@@ -1,0 +1,611 @@
+---
+header-includes:
+- \usepackage{pdflscape}
+- \newcommand{\blandscape}{\begin{landscape}}
+- \newcommand{\elandscape}{\end{landscape}}
+output:
+  pdf_document: default
+  word_document: default
+  html_document: default
+---
+
+
+```{r setup, include=FALSE}
+## Setting the WD this way will prevent the need for everyone to have specific code for their own computers.
+
+library(stringr)
+library(lubridate)
+
+## WORKING DIRECTORY 
+current_wd <- getwd()
+
+if(grepl("keshetronen", current_wd)) {
+  workingdir <- "/Users/keshetronen/Library/CloudStorage/OneDrive-SharedLibraries-UW/Arya Kadakia - PCORI/DataTables"
+} else if(grepl("arya", current_wd)){
+  workingdir <- "C:/Users/arya1999/OneDrive - UW/PCORI/DataTables"
+} else {
+  print("Incorrect working directory.")
+}
+
+## GENERATE DATE OF CLOSEST FRIDAY (IF TODAY IS FRIDAY, IT WILL RETURN TODAY'S DATE)
+last_friday <- Sys.Date() - wday(Sys.Date() + 1)
+
+if((Sys.Date()-last_friday)>=7){
+  last_friday <- Sys.Date()
+}
+
+```
+
+---
+title: "PCORI data report"
+author: "Keshet Ronen & Arya Kadakia"
+date: "Report run with data up to `r last_friday`"
+output:
+  pdf_document: default
+  word_document: default
+---
+
+\newpage
+```{r, include=FALSE}
+knitr::opts_chunk$set(echo = F, warning = F, message = F, fig.width = 7, fig.height = 9, fig.margin = c(1, 1, 1, 1, "in"))
+```
+
+```{r packages, include=FALSE}
+
+packages <- c("redcapAPI", "dplyr","magrittr","zoo","lubridate","ggplot2","openxlsx", "png","knitr","DiagrammeR", "tidyverse", "eeptools", "stringr", "haven", "reshape2", "here", "Hmisc", "anthro", "devtools", "kableExtra", "gdata", "compareGroups", "readxl", "foreign", "devtools", "httr", "table1", "readxl", "gtsummary", "chron")
+
+#new.packages <- packages[!(packages %in% installed.packages()[,"Package"])]
+#if(length(new.packages > 0)) install.packages(new.packages)
+
+devtools::install_github("kupietz/kableExtra")
+
+for (val in packages){
+lapply(packages, library, character.only = TRUE)
+}
+
+(.packages())
+
+#tinytex::install_tinytex(force=TRUE)
+
+```
+
+```{r data, include=FALSE}
+
+## From Redcap 
+screen <- read.csv(paste(workingdir,"/REDCapData/PCORIClientScreener_DATA_", last_friday, ".csv", sep=""))
+
+assess <- read.csv(paste(workingdir,"/REDCapData/PCORIClientAssessmen_DATA_", last_friday, ".csv", sep=""))
+
+
+## need to save LMS data as utf8 encoded (or find a way to change encoding in import)
+lms <- read.csv(paste(workingdir,"/LMSData/Weekly_Metrics_DATA_", last_friday, ".csv", sep=""))
+
+
+
+```
+
+```{r data_clean, include=FALSE}
+
+## Data cleaning (will eventually move to a different script)
+
+
+
+# subset screening dataset to exclude records with duplicate phone numbers (keep 1st instance of duplicates)
+invalid <- c("1")
+screen_dedup <- screen[!(screen$track_invalid %in% invalid), ]
+
+#community partners
+
+
+
+```
+
+\newpage
+
+## Updates Table
+
+```{r Updates, echo=FALSE}
+
+#make screen_dedup_lw for only data from last week
+screen_dedup$date <- as.Date(substr(screen_dedup$datetime,start = 1, stop = 10))
+screen_dedup_lw <- screen_dedup %>% filter(date >= last_friday-7)
+
+assess$date <- as.Date(substr(assess$start_datetime,start = 1, stop = 10))
+assess_lw <- assess %>% filter(date >= last_friday-7)
+
+#screened by provider
+
+screened <- length(unique(screen_dedup$client_id))
+screened_den <- NA
+
+screened_lw <- length(unique(screen_dedup_lw$client_id))
+
+#haven't reached out yet
+no_text <- screened - sum(screen_dedup$track_first_contact==1, na.rm=T)
+no_text_den <- screened
+
+#not interested in call
+no_call_interest <- sum(screen$call_interest==0, na.rm=T)
+no_call_interest_den <- screened
+
+#didn't respond
+no_response <-sum(screen$track_client_drop, na.rm=T)
+no_response_den <- screened
+
+#contacted by study (FOCUS info call)
+firstcontact <- sum(screen$track_consent_call, na.rm = T)
+firstcontact_den <- screened
+
+firstcontact_lw <- sum(screen_dedup_lw$track_consent_call, na.rm=T)
+
+#waiting for call
+in_process <- sum(screen$track_first_contact, na.rm=T)- firstcontact - no_call_interest
+
+#interest in research study
+research_interest <- sum(screen$track_participation_type==1, na.rm=T)
+research_interest_den <- firstcontact
+
+research_interest_lw <- sum(screen_dedup_lw$track_participation_type==1, na.rm=T)
+
+# interest in FOCUS only
+focus_interest <- sum(screen$track_participation_type==2, na.rm=T)
+focus_interest_den <- firstcontact
+
+focus_interest_lw <-sum(screen_dedup_lw$track_participation_type==2, na.rm=T) 
+
+# Not interested in study or FOCUS
+no_interest <- sum(screen$track_participation_type==3, na.rm=T)
+no_interest_den <- firstcontact
+
+no_interest_lw <- sum(screen_dedup_lw$track_participation_type==3, na.rm=T) 
+
+#eligible for FOCUS (from FOCUS only)
+focus_only_eligible <- sum(screen$track_focus_eligible[screen$track_participation_type==2], na.rm = T)
+focus_only_eligible_den <- focus_interest
+
+focus_only_eligible_lw <- sum(screen_dedup_lw$track_focus_eligible[screen$track_participation_type==2], na.rm = T)
+
+#eligible for FOCUS (from FOCUS + study)
+focus_study_eligible <- sum(screen$track_focus_eligible[screen$track_participation_type==1], na.rm = T)
+focus_study_eligible_den <- research_interest
+
+focus_study_eligible_lw <- sum(screen_dedup_lw$track_focus_eligible[screen$track_participation_type==1], na.rm = T)
+
+
+#eligible for study
+#note if eligibility was not assessed, this will just reduce the count of eligible & ineligible - won't be able to see it wasn't assessed
+eligible_study <- sum(screen$track_study_eligible==1, na.rm=T)
+eligible_study_den <- focus_study_eligible
+
+eligible_study_lw <- sum(screen_dedup_lw$track_study_eligible==1, na.rm=T)
+
+#consented to study
+consent_study <- sum(screen$track_obtained_consent, na.rm=T)
+consent_study_den <- eligible_study
+
+consent_study_lw <- sum(screen_dedup_lw$track_obtained_consent, na.rm=T)
+
+# ineligible for study but still interested in FOCUS
+focus_only_study_inelgible <- sum(screen$track_focus_study_ineligble, na.rm=T)
+focus_only_study_inelgible_den <- focus_study_eligible
+
+focus_only_study_inelgible_lw <- sum(screen_dedup_lw$track_focus_study_ineligble, na.rm=T)
+
+#enrolled FOCUS only and installed FOCUS
+enrolled_focus_installed_focus <- sum(screen$track_installed_focus[screen$track_participation_type==2], na.rm=T) + sum(screen$track_installed_focus[screen$track_focus_study_ineligble==1], na.rm=T)
+enrolled_focus_installed_focus_den <- focus_only_study_inelgible + focus_only_eligible
+
+enrolled_focus_installed_focus_lw <- sum(screen_dedup_lw$track_installed_focus[screen$track_participation_type==2], na.rm=T) + sum(screen_dedup_lw$track_installed_focus[screen_dedup_lw$track_focus_study_ineligble==1], na.rm=T)
+
+#completed baseline - from assessment dataset
+baseline_complete = sum(assess$track_survey_completion==1, na.rm=T)
+baseline_complete_den = consent_study
+
+baseline_complete_lw = sum(assess_lw$track_survey_completion==1, na.rm=T)
+
+#enrolled FOCUS + study & installed FOCUS
+enrolled_study_installed_focus <- sum(screen$track_installed_focus[screen$track_participation_type==1], na.rm=T) - sum(screen$track_installed_focus[screen$track_focus_study_ineligble==1], na.rm=T)
+enrolled_study_installed_focus_den <- baseline_complete
+
+enrolled_study_installed_focus_lw <- sum(screen_dedup_lw$track_installed_focus[screen$track_participation_type==1], na.rm=T) - sum(screen_dedup_lw$track_installed_focus[screen_dedup_lw$track_focus_study_ineligble==1], na.rm=T)
+
+#completed 3mo - from assessment dataset 
+follow_complete = sum(assess$track_survey_completion_v2==1, na.rm=T)
+follow_complete_den = enrolled_study_installed_focus
+
+follow_complete_lw = sum(assess_lw$track_survey_completion_v2==1, na.rm=T)
+
+```
+
+\newpage
+
+## Table
+
+```{r CONSORT, echo=FALSE, comment=NA}
+
+#make table
+numerator = rbind(screened, no_text, no_call_interest, no_response, firstcontact, research_interest, focus_interest, no_interest, focus_only_eligible, focus_study_eligible, eligible_study, consent_study, focus_only_study_inelgible, enrolled_focus_installed_focus, baseline_complete, enrolled_study_installed_focus, follow_complete)
+row.names(numerator) = c("Screened", "Not contacted yet", "No interest in call", "Lost client", "FOCUS info call", "Interested in study", "Interested in FOCUS only", "Not interested in participating", "Eligible for FOCUS (Only)", "Eligible for FOCUS (Study)", "Eligible for Study", "Consented to Study", "Ineligible for Study but interested in FOCUS", "Installed FOCUS (Only)", "Completed Baseline", "Installed FOCUS (Study)", "Completed 3M")
+
+denominator = rbind(screened_den, no_text_den, no_call_interest_den, no_response_den, firstcontact_den, research_interest_den, focus_interest_den, no_interest_den, focus_only_eligible_den, focus_study_eligible_den, eligible_study_den, consent_study_den, focus_only_study_inelgible_den, enrolled_focus_installed_focus_den, baseline_complete_den, enrolled_study_installed_focus_den, follow_complete_den)
+row.names(denominator) = c("Screened", "Not contacted yet","No interest in call", "Lost client", "FOCUS info call", "Interested in study", "Interested in FOCUS only", "Not interested in participating", "Eligible for FOCUS (Only)", "Eligible for FOCUS (Study)", "Eligible for Study", "Consented to Study", "Ineligible for Study but interested in FOCUS", "Installed FOCUS (Only)", "Completed Baseline", "Installed FOCUS (Study)", "Completed 3M")
+
+tblconsort <- as.data.frame(cbind(numerator, denominator)) %>%
+  rename(n=V1, N=V2) %>%
+  mutate("%" = n/N*100)
+
+kbl(tblconsort, booktabs=T) 
+
+
+```
+
+\newpage
+
+## Duplicates List
+
+```{r duplicates, echo=FALSE, comment=NA}
+
+# all name lower case
+screen_lower <- screen %>%
+  mutate(client_first_name = tolower(client_first_name),
+         client_last_name = tolower(client_last_name))
+
+# Printing duplicates based on (client_first_name AND client_last_name) or phone
+duplicates <- screen_lower[duplicated(screen_lower[c("client_first_name", "client_last_name")]) |
+                 duplicated(screen_lower[c("client_first_name", "client_last_name")], fromLast = TRUE) |
+                 duplicated(screen_lower$phone) | duplicated(screen_lower$phone, fromLast = TRUE), ]
+
+reviewed <- c("1", "0")
+dups <- duplicates[!(duplicates$track_invalid %in% reviewed),]
+
+if (length(dups$client_id) == 0) {
+  cat("None\n")
+} else {
+  cat(dups$client_id, "\n")
+}
+
+```
+
+\newpage
+## Overall Flow
+```{r flow, fig.retina = "pdf"}
+#install.packages("DiagrammeR")
+#install.packages("extrafont")
+
+
+library(ggplot2)
+library(ggrepel)
+
+
+font_size = 2.5
+
+
+consort <- tibble(x= 1:100, y= 1:100)
+
+
+consort %>% 
+        ggplot(aes(x, y)) +
+        scale_x_continuous(minor_breaks = seq(10, 100, 10)) +
+        scale_y_continuous(minor_breaks = seq(10, 100, 10)) +
+        theme_linedraw() +
+        theme(plot.background = element_blank(), aspect.ratio = 1) ->
+        p
+
+p +
+        geom_rect(xmin = 40, xmax=60, ymin=107, ymax=113, color='black',
+                  fill='white', size=0.25, size=0.25) +
+        annotate('text', x= 50, y=111, color='black', label= paste("Screened (n = ",screened,")", sep=""), size=font_size) +
+        annotate('text', x= 50, y=108, color='blue', label= paste("Last week (+", screened_lw,")", sep=""), size=font_size) -> p -> p 
+
+p+
+        geom_rect(xmin = 65, xmax=85, ymin=100, ymax=109, color='black',
+                  fill='white', size=0.25) +
+        annotate('text', x=75, y=105,label= paste("No response (n=",no_response,")\n Not interested in call (n=",no_call_interest,")\n Not contacted yet (n=",no_text,")\n Waiting for call (n=",in_process,")", sep=""), size=font_size) -> p 
+
+p +
+        geom_rect(xmin = 38, xmax=62, ymin=92, ymax=96, color='black',
+                  fill='white', size=0.25) +
+        annotate('text', x= 50, y=95,label= paste("FOCUS description call (n = ",firstcontact,")", sep=""), size=font_size) +
+        annotate('text', x= 50, y=93, color = 'blue', label= paste("Last week (+",firstcontact_lw,")", sep=""), size=font_size) -> p
+
+p + 
+        geom_segment(
+                x=50, xend=50, y=107, yend=96, 
+                size=0.15, linejoin = "mitre", lineend = "butt",
+                arrow = arrow(length = unit(1, "mm"), type= "closed")) +
+        geom_segment(
+                x=50, xend=65, y=104, yend=104, 
+                size=0.15, linejoin = "mitre", lineend = "butt",
+                arrow = arrow(length = unit(1, "mm"), type= "closed")) -> p
+
+p + 
+        geom_segment(
+                #middle arrow first
+                x=50, xend=50, y=92, yend=89, 
+                size=0.15, linejoin = "mitre", lineend = "butt") +
+        geom_segment(
+                x=50, xend=50, y=89, yend=86, 
+                size=0.15, linejoin = "mitre", lineend = "butt",
+                arrow = arrow(length = unit(1, "mm"), type= "closed")) +
+        geom_segment(
+                x=20, xend=20, y=89, yend=86, 
+                size=0.15, linejoin = "mitre", lineend = "butt",
+                arrow = arrow(length = unit(1, "mm"), type= "closed")) +
+        geom_segment(
+                x=80, xend=80, y=89, yend=86, 
+                size=0.15, linejoin = "mitre", lineend = "butt",
+                arrow = arrow(length = unit(1, "mm"), type= "closed")) +
+        geom_segment(
+                x=20, xend=80, y=89, yend=89, 
+                size=0.15, linejoin = "mitre", lineend = "butt") -> p
+
+p +
+        geom_rect(xmin = 10, xmax=30, ymin=81, ymax=86, color='black',
+                  fill='white', size=0.25) +
+        annotate('text', x= 20, y=84,label= paste("Interest in Study (n=",research_interest,")", sep = ""), size=font_size) +
+        annotate('text', x= 20, y=82, color = 'blue', label= paste("Last week (+",research_interest_lw,")", sep=""), size=font_size) +
+        
+        geom_rect(xmin = 70, xmax=90, ymin=81, ymax=86, color='black',
+                  fill='white', size=0.25) +
+        annotate('text', x= 80, y=84,label= paste("Interest in FOCUS only (n=",focus_interest,")",sep = ""), size=font_size) +
+        annotate('text', x= 80, y=82, color = 'blue', label= paste("Last week (+",focus_interest_lw,")", sep=""), size=font_size) +
+        
+        geom_rect(xmin = 40, xmax=60, ymin=81, ymax=86, color='black',
+                  fill='white', size=0.25) +
+        annotate('text', x= 50, y=84,label= paste("No interest (n=",no_interest,")",sep = ""), size=font_size) +
+        annotate('text', x= 50, y=82, color = 'blue', label= paste("Last week (+",no_interest_lw,")", sep=""), size=font_size) -> p
+
+p +
+        geom_rect(xmin = 10, xmax=30, ymin=73, ymax=78, color='black',
+                  fill='white', size=0.25) +
+        annotate('text', x= 20, y=76,label= paste("Eligible for FOCUS (n=",focus_study_eligible,")",sep = ""), size=font_size) +
+        annotate('text', x= 20, y=74, color = 'blue', label= paste("Last week (+",focus_study_eligible_lw,")", sep=""), size=font_size) +
+
+        geom_rect(xmin = 70, xmax=90, ymin=73, ymax=78, color='black',
+                  fill='white', size=0.25) +
+        annotate('text', x= 80, y=76,label= paste("Eligible for FOCUS (n=",focus_only_eligible,")",sep = ""), size=font_size) +
+        annotate('text', x= 80, y=74, color = 'blue', label= paste("Last week (+",focus_only_eligible_lw,")", sep=""), size=font_size) +
+
+  
+        geom_rect(xmin = 10, xmax=30, ymin=65, ymax=70, color='black',
+                  fill='white', size=0.25) +
+        annotate('text', x= 20, y=68,label= paste("Eligible for Study (n=",eligible_study,")",sep = ""), size=font_size) +
+        annotate('text', x= 20, y=66, color = 'blue', label= paste("Last week (+",eligible_study_lw,")", sep=""), size=font_size) +
+
+        geom_rect(xmin = 40, xmax=60, ymin=67, ymax=74, color='black',
+                 fill='white', size=0.25, size=0.25) +
+        annotate('text', x= 50, y=72,label= paste("Ineligible for Study -\nFOCUS only (n=",focus_only_study_inelgible,")",sep = ""), size=font_size) +
+        annotate('text', x= 50, y=69, color = 'blue', label= paste("Last week (+",focus_only_study_inelgible_lw,")", sep=""), size=font_size) +
+
+        
+        geom_rect(xmin = 10, xmax=30, ymin=57, ymax=62, color='black',
+                  fill='white', size=0.25, size=0.25) +
+        annotate('text', x= 20, y=60,label= paste("Consented to Study (n=",consent_study,")",sep = ""), size=font_size) +
+        annotate('text', x= 20, y=58, color = 'blue', label= paste("Last week (+",consent_study_lw,")", sep=""), size=font_size) +
+        geom_rect(xmin = 10, xmax=30, ymin=49, ymax=54, color='black',
+                  fill='white', size=0.25, size=0.25) +
+        annotate('text', x= 20, y=52,label= paste("Completed Baseline (n=",baseline_complete,")",sep = ""), size=font_size) +
+        annotate('text', x= 20, y=50, color = 'blue', label= paste("Last week (+",baseline_complete_lw,")", sep=""), size=font_size) +
+        
+        geom_rect(xmin = 10, xmax=30, ymin=41, ymax=46, color='black',
+                  fill='white', size=0.25, size=0.25) +
+        annotate('text', x= 20, y=44,label= paste("Installed FOCUS (n=",enrolled_study_installed_focus,")",sep = ""), size=font_size) +
+        annotate('text', x= 20, y=42, color = 'blue', label= paste("Last week (+",enrolled_study_installed_focus_lw,")", sep=""), size=font_size) +
+        geom_rect(xmin = 70, xmax=90, ymin=41, ymax=46, color='black',
+                  fill='white', size=0.25) +
+        annotate('text', x= 80, y=44,label= paste("Installed FOCUS (n=",enrolled_focus_installed_focus,")",sep = ""), size=font_size) + 
+        annotate('text', x= 80, y=42, color = 'blue', label= paste("Last week (+",enrolled_focus_installed_focus_lw,")", sep=""), size=font_size) +
+        
+        geom_rect(xmin = 10, xmax=30, ymin=33, ymax=38, color='black',
+                  fill='white', size=0.25, size=0.25) +
+        annotate('text', x=20, y=36,label= paste("Completed 3M (n=",follow_complete,")",sep = ""), size=font_size) +
+        annotate('text', x= 20, y=34, color = 'blue', label= paste("Last week (+",follow_complete_lw,")", sep=""), size=font_size) +
+
+
+        
+        geom_segment(
+                x=20, xend=20, y=81, yend=78, 
+                size=0.15, linejoin = "mitre", lineend = "butt",
+                arrow = arrow(length = unit(1, "mm"), type= "closed")) +
+        geom_segment(
+                x=20, xend=20, y=73, yend=70, 
+                size=0.15, linejoin = "mitre", lineend = "butt",
+                arrow = arrow(length = unit(1, "mm"), type= "closed")) +
+        geom_segment(
+                x=20, xend=20, y=65, yend=62, 
+                size=0.15, linejoin = "mitre", lineend = "butt",
+                arrow = arrow(length = unit(1, "mm"), type= "closed")) +
+        geom_segment(
+                x=20, xend=20, y=57, yend=54, 
+                size=0.15, linejoin = "mitre", lineend = "butt",
+                arrow = arrow(length = unit(1, "mm"), type= "closed")) +
+          geom_segment(
+                x=20, xend=20, y=49, yend=46, 
+                size=0.15, linejoin = "mitre", lineend = "butt",
+                arrow = arrow(length = unit(1, "mm"), type= "closed")) +
+        geom_segment(
+                x=20, xend=20, y=41, yend=38, 
+                size=0.15, linejoin = "mitre", lineend = "butt",
+                arrow = arrow(length = unit(1, "mm"), type= "closed")) +
+        geom_segment(
+                x=80, xend=80,  y=81, yend=78, 
+                size=0.15, linejoin = "mitre", lineend = "butt",
+                arrow = arrow(length = unit(1, "mm"), type= "closed")) +
+        geom_segment(
+                x=80, xend=80, y=73, yend=46, 
+                size=0.15, linejoin = "mitre", lineend = "butt",
+                arrow = arrow(length = unit(1, "mm"), type= "closed")) +
+        geom_segment(
+                x=20, xend=40, y=71.5, yend=71.5, 
+                size=0.15, linejoin = "mitre", lineend = "butt",
+                arrow = arrow(length = unit(1, "mm"), type= "closed")) +
+        geom_segment(
+                x=50, xend=50, y=67, yend=43.5, 
+                size=0.15, linejoin = "mitre", lineend = "butt") +
+        geom_segment(
+                x=50, xend=70, y=43.5, yend=43.5, 
+                size=0.15, linejoin = "mitre", lineend = "butt",
+                arrow = arrow(length = unit(1, "mm"), type= "closed")) +
+        theme_void()
+
+```
+
+
+\newpage
+## Process Table 1: 7 days since first contact and no consent call
+```{r Table 1: 7 days since first contact and no consent call}
+
+# tracker: date of 1st SMS (track_first_text_date) & (track_consent_call) yes/no
+screen <- screen %>%
+  mutate(track_first_text_date = as.Date(track_first_text_date),
+    sms7 = ifelse(last_friday - track_first_text_date >=7,1,0),
+         noconsent = ifelse((is.na(track_consent_call) | track_consent_call == 0) & sms7 == 1 & (call_interest == 1 | is.na(call_interest)), 1, 0)
+
+         )
+
+tbl1 <- screen %>%
+  summarise(
+    "Screened >=7days ago" = sum(sms7, na.rm = T),
+    "No consent call" = sum(noconsent,na.rm = T)
+  )
+
+kbl(tbl1, booktabs=T) 
+
+```
+
+## IDs of pending calls
+```
+IDs: `r screen$client_id[screen$noconsent==1 & !is.na(screen$sms7)]`
+
+```
+
+## Process Table 2: Finished baseline but didn’t install FOCUS after 30 days
+```{r Table 2: Finished baseline but didn’t install FOCUS after 30 days}
+
+# assessment: redcap completed timestamp field for last survey (probably GAD); (track_treatment_start) date non-null
+assess <- assess %>%
+  mutate(gad7_a7c3_date = as.Date(substr(gad7_a7c3_timestamp,start=1, stop=10)),
+    baseline30 = ifelse(redcap_event_name=="client_baseline_arm_1" & (last_friday - gad7_a7c3_date >=30) ,1,0),
+    nostart = ifelse(track_treatment_start=="" & baseline30==1, 1, 0)
+         )
+
+tbl2 <- assess %>%
+  summarise(
+    "Completed baseline >=30 days ago" = sum(baseline30, na.rm = T),
+    "No treatment start date" = sum(nostart,na.rm = T)
+  )
+
+kbl(tbl2, booktabs=T) 
+
+```
+
+## Process Table 3: 97 days since treatment start but no 3M survey response
+```{r Table 3: 97 days since treatment start but no 3M survey response}
+
+# assessment: redcap completed timestamp field for last survey at 3M (probably GAD) is null; (track_treatment_start) date >97 days
+assess <- assess %>%
+  mutate(track_treatment_start = as.Date(track_treatment_start),
+    sincestart97 = ifelse(last_friday - track_treatment_start >=97 ,1,0),
+    nofu = ifelse(redcap_event_name=="client_3m_arm_1" & is.na(gad7_a7c3_date) & sincestart97==1, 1, 0)
+         )
+
+tbl3 <- assess %>%
+  summarise(
+    "Started treatment >=97 days ago" = sum(sincestart97, na.rm = T),
+    "No 3M" = sum(nostart,na.rm = T)
+  )
+
+kbl(tbl3, booktabs=T) 
+
+```
+
+\newpage
+\blandscape
+## LMS Metrics
+
+```{r LMS, echo=FALSE}
+#settings to have 2 decimal places in table
+options(scipen = 1, digits = 2)
+
+#lms <- lms %>% rename(Group = User.s.groups...separated.by.commas) 
+lms <- lms %>%
+  mutate(pathpct = Completed.paths/Assigned.paths*100,
+         time = chron(times =Total.time.spent),
+         group = ifelse(User.s.groups...separated.by.commas=="Supervisors- Community Partners" | 
+                          User.s.groups...separated.by.commas=="Supervisors- Places for People" |
+                          User.s.groups...separated.by.commas=="Supervisors- Manchester Mental Health" , "supervisor",
+                        ifelse(User.s.groups...separated.by.commas=="Clinician- Community Partners" | 
+                            User.s.groups...separated.by.commas=="Clinician- Places for People" |
+                            User.s.groups...separated.by.commas=="Clinician- Manchester Mental Health" , "clinician",
+                          ifelse(User.s.groups...separated.by.commas=="mHealth Support Specialist" , "mHSS",
+                                 ifelse(User.s.groups...separated.by.commas=="mHealth Support Specialist, Supervisors- Places for People", "mHSS, supervisor", NA
+                                       )
+                            
+                          )
+                        )
+         )
+  )
+#i think chron stores times in days (12h = 0.5)
+
+lms_summary_pfp <- lms %>% filter(Agency=="Places for People" & Team!="") %>%
+  group_by(group, Team) %>%
+  summarise(n=n(),
+            med_paths = median(pathpct),
+            q1_paths= quantile(pathpct, probs = 0.25),
+            q3_paths = quantile(pathpct, probs = 0.75),
+            med_courses = median(Completed.courses),
+            q1_courses= quantile(Completed.courses, probs = 0.25),
+            q3_courses = quantile(Completed.courses, probs = 0.75),
+            med_hours = median(as.numeric(time)*24),
+            q1_hours=quantile(as.numeric(time)*24, probs = 0.25),
+            q3_hours = quantile(as.numeric(time)*24, probs = 0.75))
+
+lms_summary_cp <- lms %>% filter(Agency=="Community Partners" & Team!="") %>%
+  group_by(group, Team) %>%
+  summarise(n=n(),
+            med_paths = median(pathpct),
+            q1_paths= quantile(pathpct, probs = 0.25),
+            q3_paths = quantile(pathpct, probs = 0.75),
+            med_courses = median(Completed.courses),
+            q1_courses= quantile(Completed.courses, probs = 0.25),
+            q3_courses = quantile(Completed.courses, probs = 0.75),
+            med_hours = median(as.numeric(time)*24),
+            q1_hours=quantile(as.numeric(time)*24, probs = 0.25),
+            q3_hours = quantile(as.numeric(time)*24, probs = 0.75))
+
+lms_summary_m <- lms %>% filter(Agency=="Mental Health Center of Greater Manchester" & Team!="") %>%
+  group_by(group, Team) %>%
+  summarise(n=n(),
+            med_paths = median(pathpct),
+            q1_paths= quantile(pathpct, probs = 0.25),
+            q3_paths = quantile(pathpct, probs = 0.75),
+            med_courses = median(Completed.courses),
+            q1_courses= quantile(Completed.courses, probs = 0.25),
+            q3_courses = quantile(Completed.courses, probs = 0.75),
+            med_hours = median(as.numeric(time)*24),
+            q1_hours=quantile(as.numeric(time)*24, probs = 0.25),
+            q3_hours = quantile(as.numeric(time)*24, probs = 0.75))
+
+############# TO-DO
+## check with Justin how he wants people who are in 2 groups to be treated. Possibly need to be turned into 2 records in the 2 groups
+```
+
+Places for People
+```{r Places for People, echo=FALSE}
+kbl(lms_summary_pfp, booktabs=T)
+```
+
+
+Community Partners
+```{r Community Partners, echo=FALSE}
+kbl(lms_summary_cp, booktabs=T)
+```
+
+
+Manchester
+```{r Manchester, echo=FALSE}
+kbl(lms_summary_m, booktabs=T)
+```
+
+
+\elandscape

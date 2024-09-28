@@ -1,0 +1,356 @@
+---
+header-includes:
+- \usepackage{pdflscape}
+- \newcommand{\blandscape}{\begin{landscape}}
+- \newcommand{\elandscape}{\end{landscape}}
+output:
+  pdf_document: default
+  word_document: default
+  html_document: default
+---
+
+
+```{r setup, include=FALSE}
+## Setting the WD this way will prevent the need for everyone to have specific code for their own computers.
+
+library(stringr)
+library(lubridate)
+
+## WORKING DIRECTORY 
+current_wd <- getwd()
+
+if(grepl("keshetronen", current_wd)) {
+  workingdir <- "/Users/keshetronen/Library/CloudStorage/OneDrive-SharedLibraries-UW/Arya Kadakia - PCORI/DataTables"
+} else if(grepl("arya", current_wd)){
+  workingdir <- "C:/Users/arya1999/OneDrive - UW/PCORI/DataTables"
+} else {
+  print("Incorrect working directory.")
+}
+
+## GENERATE DATE OF CLOSEST FRIDAY (IF TODAY IS FRIDAY, IT WILL RETURN TODAY'S DATE)
+last_friday <- Sys.Date() - wday(Sys.Date() + 1)
+
+if((Sys.Date()-last_friday)>=7){
+  last_friday <- Sys.Date()
+}
+
+```
+
+---
+title: "PCORI data report"
+author: "Keshet Ronen & Arya Kadakia"
+date: "Report run with data up to `r last_friday`"
+output:
+  pdf_document: default
+  word_document: default
+---
+
+\newpage
+```{r knitr, include=FALSE}
+knitr::opts_chunk$set(echo = F, warning = F, message = F, fig.width = 7, fig.height = 9, fig.margin = c(1, 1, 1, 1, "in"))
+```
+
+```{r packages, include=FALSE}
+
+packages <- c("redcapAPI", "dplyr","magrittr","zoo","lubridate","ggplot2","openxlsx", "png","knitr","DiagrammeR", "tidyverse", "eeptools", "stringr", "haven", "reshape2", "here", "Hmisc", "anthro", "devtools", "kableExtra", "gdata", "compareGroups", "readxl", "foreign", "devtools", "httr", "table1", "readxl", "gtsummary", "chron")
+
+
+devtools::install_github("kupietz/kableExtra")
+
+for (val in packages){
+lapply(packages, library, character.only = TRUE)
+}
+
+(.packages())
+
+
+```
+
+```{r data, include=FALSE}
+
+## From Redcap 
+screen <- read.csv(paste(workingdir,"/REDCapData/PCORIClientScreener_DATA_", last_friday, ".csv", sep=""))
+
+assess <- read.csv(paste(workingdir,"/REDCapData/PCORIClientAssessmen_DATA_", last_friday, ".csv", sep=""))
+
+
+## need to save LMS data as utf8 encoded (or find a way to change encoding in import)
+#lms <- read.csv(paste(workingdir,"/LMSData/Weekly_Metrics_DATA_", last_friday, ".csv", sep=""))
+
+
+
+```
+
+```{r data_clean, include=FALSE}
+
+# subset screening dataset to exclude records with duplicate phone numbers (keep 1st instance of duplicates)
+invalid <- c("1")
+screen_dedup <- screen[!(screen$track_invalid %in% invalid), ]
+
+#Places for People
+pfp_screen <- screen_dedup[screen_dedup$health_center == 1, ]
+pfp_assess <- assess[grepl("^P", assess$redcap_survey_identifier), ]
+
+#Manchester
+mh_screen <- screen_dedup[screen_dedup$health_center == 2, ]
+mh_assess <- assess[grepl("^M", assess$redcap_survey_identifier), ]
+
+#Community Partners
+cp_screen <- screen_dedup[screen_dedup$health_center == 3, ]
+cp_assess <- assess[grepl("^C", assess$redcap_survey_identifier), ]
+
+
+#last week calculations
+screen_dedup$date <- as.Date(substr(screen_dedup$datetime,start = 1, stop = 10))
+screen_dedup_lw <- screen_dedup %>% filter(date >= last_friday-7)
+
+pfp_screen_lw <- screen_dedup_lw[screen_dedup_lw$health_center == 1, ]
+mh_screen_lw <- screen_dedup_lw[screen_dedup_lw$health_center == 2, ]
+cp_screen_lw <- screen_dedup_lw[screen_dedup_lw$health_center == 3, ]
+
+###
+pfp_call_date <- pfp_screen %>% filter(track_call_date >= last_friday-7)
+mh_call_date <- mh_screen %>% filter(track_call_date >= last_friday-7)
+cp_call_date <- cp_screen %>% filter(track_call_date >= last_friday-7)
+
+####
+assess$date <- as.Date(substr(assess$start_datetime,start = 1, stop = 10))
+assess_lw <- assess %>% filter(date >= last_friday-7)
+
+pfp_assess_lw <- assess_lw[grepl("^P", assess_lw$redcap_survey_identifier), ]
+mh_assess_lw <- assess_lw[grepl("^M", assess_lw$redcap_survey_identifier), ]
+cp_assess_lw <- assess_lw[grepl("^C", assess_lw$redcap_survey_identifier), ]
+###
+
+```
+\newpage
+## Updates Table
+
+```{r Updates, echo=FALSE}
+#referred
+
+pfp_referred <- length(unique(pfp_screen$client_id))
+mh_referred <- length(unique(mh_screen$client_id))
+cp_referred <- length(unique(cp_screen$client_id))
+
+pfp_referred_lw <-  length(unique(pfp_screen_lw$client_id))
+mh_referred_lw <- length(unique(mh_screen_lw$client_id))
+cp_referred_lw <- length(unique(cp_screen_lw$client_id))
+
+# waiting to call
+pfp_waiting <- pfp_referred - (sum(pfp_screen$track_consent_call==1, na.rm=T) + sum(pfp_screen$call_interest==0, na.rm=T))
+mh_waiting <- mh_referred - sum(mh_screen$track_consent_call==1, na.rm=T) - sum(mh_screen$call_interest==0, na.rm=T)
+cp_waiting <- cp_referred - (sum(cp_screen$track_consent_call==1, na.rm=T) + sum(cp_screen$call_interest==0, na.rm=T))
+
+# not interested in study
+pfp_no_interest <- sum(pfp_screen$call_interest==0 | pfp_screen$track_participation_type == 3, na.rm=T)
+mh_no_interest <- sum(mh_screen$call_interest==0 | mh_screen$track_participation_type == 3, na.rm=T)
+cp_no_interest <- sum(cp_screen$call_interest==0 | cp_screen$track_participation_type == 3, na.rm=T)
+
+# interested in study
+pfp_call <- sum(pfp_screen$track_participation_type==1, na.rm=T) + sum(pfp_screen$track_participation_type==2, na.rm=T)
+mh_call <- sum(mh_screen$track_participation_type==1, na.rm=T) + sum(mh_screen$track_participation_type==2, na.rm=T)
+cp_call <- sum(cp_screen$track_participation_type==1, na.rm=T) + sum(cp_screen$track_participation_type==2, na.rm=T)
+
+pfp_call_lw <- sum(pfp_call_date$track_consent_call, na.rm = T)
+mh_call_lw <- sum(mh_call_date$track_consent_call, na.rm = T)
+cp_call_lw <- sum(cp_call_date$track_consent_call, na.rm = T)
+
+#ineligible for FOCUS
+pfp_focus_ineligible <- sum(pfp_screen$track_focus_eligible==0 & pfp_screen$track_participation_type!=3, na.rm = T)
+mh_focus_ineligible <- sum(mh_screen$track_focus_eligible==0 & mh_screen$track_participation_type!=3, na.rm = T)
+cp_focus_ineligible <- sum(cp_screen$track_focus_eligible==0 & cp_screen$track_participation_type!=3, na.rm = T)
+ 
+# Using FOCUS only
+
+pfp_focus_study_ineligible <- sum(pfp_screen$track_focus_study_ineligble, na.rm = TRUE)
+mh_focus_study_ineligible <- sum(mh_screen$track_focus_study_ineligble, na.rm = TRUE)
+cp_focus_study_ineligible <- sum(cp_screen$track_focus_study_ineligble, na.rm = TRUE)
+
+pfp_focus_only_eligible <- sum(pfp_screen$track_focus_eligible[pfp_screen$track_participation_type == 2], na.rm = TRUE)
+mh_focus_only_eligible <- sum(mh_screen$track_focus_eligible[mh_screen$track_participation_type == 2], na.rm = TRUE)
+cp_focus_only_eligible <- sum(cp_screen$track_focus_eligible[cp_screen$track_participation_type == 2], na.rm = TRUE)
+
+pfp_focus_only <- pfp_focus_study_ineligible + pfp_focus_only_eligible
+mh_focus_only <- mh_focus_study_ineligible + mh_focus_only_eligible
+cp_focus_only <- cp_focus_study_ineligible + cp_focus_only_eligible
+
+## eligible for study?
+
+# Consented to Study
+pfp_consented <- sum(pfp_screen$track_obtained_consent, na.rm=T)
+mh_consented <- sum(mh_screen$track_obtained_consent, na.rm=T)
+cp_consented <- sum(cp_screen$track_obtained_consent, na.rm=T)
+
+# Completed Baseline
+pfp_baseline = sum(pfp_assess$track_survey_completion==1, na.rm=T)
+mh_baseline = sum(mh_assess$track_survey_completion==1, na.rm=T)
+cp_baseline = sum(cp_assess$track_survey_completion==1, na.rm=T)
+
+pfp_baseline_lw = sum(pfp_assess_lw$track_survey_completion==1, na.rm=T)
+mh_baseline_lw = sum(mh_assess_lw$track_survey_completion==1, na.rm=T)
+cp_baseline_lw = sum(cp_assess_lw$track_survey_completion==1, na.rm=T)
+
+# Lost to follow-up after baseline
+pfp_lost_b = sum(pfp_assess$b_follow_lost==1, na.rm=T)
+mh_lost_b = sum(mh_assess$b_follow_lost==1, na.rm=T)
+cp_lost_b = sum(cp_assess$b_follow_lost==1, na.rm=T)
+
+# Lost to follow-up after intervention
+pfp_lost_m = sum(pfp_assess$m_follow_lost==1, na.rm=T)
+mh_lost_m = sum(mh_assess$m_follow_lost==1, na.rm=T)
+cp_lost_m = sum(cp_assess$m_follow_lost==1, na.rm=T)
+
+#Installed FOCUS
+pfp_install <- sum(pfp_screen$track_installed_focus, na.rm=T)
+mh_install <- sum(mh_screen$track_installed_focus, na.rm=T)
+cp_install <- sum(cp_screen$track_installed_focus, na.rm=T)
+
+#Android:iPhone
+pfp_android <- sum(pfp_screen$track_os == 1, na.rm = TRUE)
+pfp_iphone <- sum(pfp_screen$track_os == 2, na.rm = TRUE)
+pfp_os <- paste(pfp_android, ":", pfp_iphone, sep = "")
+
+mh_android <- sum(mh_screen$track_os == 1, na.rm = TRUE)
+mh_iphone <- sum(mh_screen$track_os == 2, na.rm = TRUE)
+mh_os <- paste(mh_android, ":", mh_iphone, sep = "")
+
+cp_android <- sum(cp_screen$track_os == 1, na.rm = TRUE)
+cp_iphone <- sum(cp_screen$track_os == 2, na.rm = TRUE)
+cp_os <- paste(cp_android, ":", cp_iphone, sep = "")
+
+#Completed 3M
+pfp_3m = sum(pfp_assess$track_survey_completion_v2==1, na.rm=T)
+mh_3m = sum(mh_assess$track_survey_completion_v2==1, na.rm=T)
+cp_3m = sum(cp_assess$track_survey_completion_v2==1, na.rm=T)
+
+pfp_3m_lw = sum(pfp_assess_lw$track_survey_completion_v2==1, na.rm=T)
+mh_3m_lw = sum(mh_assess_lw$track_survey_completion_v2==1, na.rm=T)
+cp_3m_lw = sum(cp_assess_lw$track_survey_completion_v2==1, na.rm=T)
+
+
+####
+
+# Create a matrix with column names as row names
+table_matrix <- matrix(
+  c(
+    paste(pfp_referred, " (+", pfp_referred_lw, ")", sep = ""), paste(mh_referred, " (+", mh_referred_lw, ")", sep = ""), paste(cp_referred, " (+", cp_referred_lw, ")", sep = ""),
+    pfp_waiting,  mh_waiting, cp_waiting,
+    pfp_no_interest, mh_no_interest, cp_no_interest, 
+    paste(pfp_call, " (+", pfp_call_lw, ")", sep = ""), paste(mh_call, " (+", mh_call_lw, ")", sep = ""), paste(cp_call, " (+", cp_call_lw, ")", sep = ""), 
+    pfp_focus_ineligible, mh_focus_ineligible, cp_focus_ineligible,
+    pfp_focus_only, mh_focus_only, cp_focus_only,
+    pfp_consented, mh_consented, cp_consented,
+    paste(pfp_baseline, " (+", pfp_baseline_lw, ")", sep = ""), paste(mh_baseline, " (+", mh_baseline_lw, ")", sep = ""), paste(cp_baseline, " (+", cp_baseline_lw, ")", sep = ""), pfp_lost_b, mh_lost_b, cp_lost_b,
+    pfp_install, mh_install, cp_install,
+    pfp_os, mh_os, cp_os, pfp_lost_m, mh_lost_m, cp_lost_m,
+    paste(pfp_3m, " (+", pfp_3m_lw, ")", sep = ""), paste(mh_3m, " (+", mh_3m_lw, ")", sep = ""), paste(cp_3m, " (+", cp_3m_lw, ")", sep = "")
+  ),
+  nrow = 13,
+  byrow = TRUE
+)
+
+colnames(table_matrix) <- c("PfP", "MHCGM", "CP")
+rownames(table_matrix) <- c("Referred", "Waiting to call", "Not interested", "Given info call", "Ineligible for FOCUS", "Using FOCUS only", "Consented to study", "Completed baseline", "Lost to follow-up (post baseline)", "Installed FOCUS", "Android:iPhone", "Lost to follow-up (post intervention)", "Completed 3M")
+
+# Generate the table using kableExtra
+library(kableExtra)
+kable(table_matrix, format = "latex", booktabs = TRUE, escape = FALSE) %>%
+  kable_styling(latex_options = "HOLD_position")
+
+```
+
+\newpage
+## Duplicates List
+
+```{r duplicates, echo=FALSE, comment=NA}
+
+# all name lower case
+screen_lower <- screen %>%
+  mutate(client_first_name = tolower(client_first_name),
+         client_last_name = tolower(client_last_name))
+
+# Printing duplicates based on (client_first_name AND client_last_name) or phone
+duplicates <- screen_lower[duplicated(screen_lower[c("client_first_name", "client_last_name")]) |
+                 duplicated(screen_lower[c("client_first_name", "client_last_name")], fromLast = TRUE) |
+                 duplicated(screen_lower$phone) | duplicated(screen_lower$phone, fromLast = TRUE), ]
+
+reviewed <- c("1", "0")
+dups <- duplicates[!(duplicates$track_invalid %in% reviewed),]
+
+if (length(dups$client_id) == 0) {
+  cat("None\n")
+} else {
+  cat(dups$client_id, "\n")
+}
+
+```
+
+
+\newpage
+## Process Table 1: 7 days since first contact and no consent call
+```{r Table 1: 7 days since first contact and no consent call}
+
+# tracker: date of 1st SMS (track_first_text_date) & (track_consent_call) yes/no
+screen <- screen %>%
+  mutate(track_first_text_date = as.Date(track_first_text_date),
+    sms7 = ifelse(last_friday - track_first_text_date >=7,1,0),
+         noconsent = ifelse((is.na(track_consent_call) | track_consent_call == 0) & sms7 == 1 & (call_interest == 1 | is.na(call_interest)), 1, 0)
+
+         )
+
+tbl1 <- screen %>%
+  summarise(
+    "Screened >=7days ago" = sum(sms7, na.rm = T),
+    "No consent call" = sum(noconsent,na.rm = T)
+  )
+
+kbl(tbl1, booktabs=T) 
+
+```
+
+## IDs of pending calls
+```
+IDs: `r screen$client_id[screen$noconsent==1 & !is.na(screen$sms7)]`
+
+```
+
+## Process Table 2: Finished baseline but didn’t install FOCUS after 30 days
+```{r Table 2: Finished baseline but didn’t install FOCUS after 30 days}
+
+# assessment: redcap completed timestamp field for last survey (probably GAD); (track_treatment_start) date non-null
+assess <- assess %>%
+  mutate(gad7_a7c3_date = as.Date(substr(gad7_a7c3_timestamp,start=1, stop=10)),
+    baseline30 = ifelse(redcap_event_name=="client_baseline_arm_1" & (last_friday - gad7_a7c3_date >=30) ,1,0),
+    nostart = ifelse(track_treatment_start=="" & baseline30==1, 1, 0)
+         )
+
+tbl2 <- assess %>%
+  summarise(
+    "Completed baseline >=30 days ago" = sum(baseline30, na.rm = T),
+    "No treatment start date" = sum(nostart,na.rm = T)
+  )
+
+kbl(tbl2, booktabs=T) 
+
+```
+
+## Process Table 3: 97 days since treatment start but no 3M survey response
+```{r Table 3: 97 days since treatment start but no 3M survey response}
+
+# assessment: redcap completed timestamp field for last survey at 3M (probably GAD) is null; (track_treatment_start) date >97 days
+assess <- assess %>%
+  mutate(track_treatment_start = as.Date(track_treatment_start),
+    sincestart97 = ifelse(last_friday - track_treatment_start >=97 ,1,0),
+    nofu = ifelse(redcap_event_name=="client_3m_arm_1" & is.na(gad7_a7c3_date) & sincestart97==1, 1, 0)
+         )
+
+tbl3 <- assess %>%
+  summarise(
+    "Started treatment >=97 days ago" = sum(sincestart97, na.rm = T),
+    "No 3M" = sum(nostart,na.rm = T)
+  )
+
+kbl(tbl3, booktabs=T) 
+
+```
